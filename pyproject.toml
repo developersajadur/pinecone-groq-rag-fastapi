@@ -1,0 +1,11 @@
+[project]
+name = "pinecone-learn"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.165.0",
+    "fastembed>=0.9.1",
+    "groq>=0.18.0",
+    "pinecone>=10.1.0",
+    "python-dotenv>=1.2.4",
+]
