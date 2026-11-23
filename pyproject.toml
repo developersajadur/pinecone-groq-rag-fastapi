@@ -7,5 +7,7 @@ dependencies = [
     "fastembed>=0.9.1",
     "groq>=0.18.0",
     "pinecone>=10.1.0",
+    "pypdf>=7.1.1",
     "python-dotenv>=1.2.4",
+    "streamlit>=1.67.0",
 ]

@@ -10,7 +10,11 @@ This application allows you to ingest documents, automatically chunk and index t
 
 - **Integrated Vector Embeddings:** Leverages Pinecone's serverless integrated embedding model (`llama-text-embed-v2` · 1024 dimensions) — no external or local embedding pipelines required.
 - **Ultra-Fast LLM Inference:** Powered by Groq's high-speed LPU running Meta's `llama-3.3-70b-versatile`.
-- **Intelligent Text Chunking:** Sliding window chunking with configurable size and overlap to preserve semantic continuity across chunk boundaries.
+- **Hybrid Search & Cross-Encoder Reranking:** Dense Semantic Search + Sparse BM25 Keyword Search combined with Reciprocal Rank Fusion (RRF) and refined with `bge-reranker-v2-m3`.
+- **PDF & Document Ingestion:** Directly upload `.pdf`, `.txt`, or `.md` files; text is parsed and indexed automatically.
+- **Conversational Memory:** Contextualizes follow-up questions using multi-turn chat history.
+- **Real-Time Token Streaming:** Live word-by-word streaming responses (ChatGPT-style typing effect).
+- **Interactive Streamlit Web UI:** Beautiful, ready-to-use frontend for document uploads and live chatting.
 - **Layered Architecture:** Clean separation of concerns with a modular `src/` layout (Schemas, Services, API Routers).
 - **Graceful Error Handling:** Comprehensive `try-except` blocks returning meaningful HTTP status codes (`400`, `500`) with actionable error details.
 - **Interactive Documentation:** Automatic Swagger/OpenAPI documentation via FastAPI.
@@ -118,9 +122,31 @@ When creating your index in the [Pinecone Console](https://app.pinecone.io/):
 
 ---
 
+## 🖥️ Interactive Web UI (Streamlit)
+
+Launch the modern chat interface in your browser:
+
+```bash
+uv run streamlit run app_ui.py
+```
+
+Features included in the Web UI:
+- **Sidebar File Ingestion:** Drag-and-drop any PDF or TXT document and index it into Pinecone with one click.
+- **Real-Time Token Streaming:** Watch responses generate word-by-word like ChatGPT.
+- **Conversational Memory:** Ask natural follow-up questions in a continuous conversation thread.
+- **Search Toggle:** Easily toggle Hybrid Search + Reranking on/off.
+
+---
+
 ## 🚦 Running the Application
 
-Start the local development server with hot-reload:
+### Option A: Run the Streamlit Web Application (Frontend + Backend)
+```bash
+uv run streamlit run app_ui.py
+```
+
+### Option B: Run the FastAPI REST Server
+Start the local FastAPI development server:
 
 ```bash
 uv run fastapi dev main.py
@@ -200,6 +226,73 @@ Access the interactive API documentation (Swagger UI) at:
   curl -X POST "http://127.0.0.1:8000/ask" \
        -H "Content-Type: application/json" \
        -d '{"query": "Which days can employees work from home?"}'
+  ```
+
+---
+
+### 4. Advanced Question (Hybrid Search + Reranking)
+* **Endpoint:** `POST /ask-advanced`
+* **Features:** Combines Semantic Vector Search (Dense) + Keyword BM25 Search (Sparse), merges candidate lists via **Reciprocal Rank Fusion (RRF)**, and reranks candidates with **`bge-reranker-v2-m3`** before sending to Groq.
+* **Request Body:**
+  ```json
+  {
+    "query": "What is the flagship product of NovaTech and what drone technology does it use?"
+  }
+  ```
+* **Response:**
+  ```json
+  {
+    "question": "What is the flagship product of NovaTech and what drone technology does it use?",
+    "answer": "NovaTech's flagship product is 'AuraScan 3.0', which uses drone imagery to detect faults in solar power plants.",
+    "sources": [
+      "NovaTech builds advanced AI systems, and their flagship product is called 'AuraScan 3.0', which detects faults in solar power plants using drone imagery."
+    ],
+    "pipeline_type": "hybrid_rrf_reranking"
+  }
+  ```
+* **cURL Example:**
+  ```bash
+  curl -X POST "http://127.0.0.1:8000/ask-advanced" \
+       -H "Content-Type: application/json" \
+       -d '{"query": "What is AuraScan 3.0?"}'
+  ```
+
+---
+
+### 5. Upload File (PDF / TXT Document)
+* **Endpoint:** `POST /upload-file`
+* **Features:** Automatically extracts text from uploaded PDF or TXT files, chunks them, and stores them in Pinecone.
+* **cURL Example:**
+  ```bash
+  curl -X POST "http://127.0.0.1:8000/upload-file" \
+       -F "file=@/path/to/handbook.pdf"
+  ```
+
+---
+
+### 6. Conversational Streaming Chat (Token Streaming & Memory)
+* **Endpoint:** `POST /chat-stream`
+* **Features:** Takes conversational history + current follow-up question, rewrites question if needed, performs Hybrid Search + Reranking, and streams tokens in real time.
+* **Request Body:**
+  ```json
+  {
+    "query": "Can I take it in December?",
+    "history": [
+      {"role": "user", "content": "What is NovaTech's leave policy?"},
+      {"role": "assistant", "content": "Employees enjoy 20 days of annual leave and 10 days of sick leave."}
+    ],
+    "use_hybrid": true
+  }
+  ```
+* **cURL Example:**
+  ```bash
+  curl -X POST "http://127.0.0.1:8000/chat-stream" \
+       -H "Content-Type: application/json" \
+       -d '{
+         "query": "Can I take it in December?",
+         "history": [{"role": "user", "content": "What is the annual leave?"}],
+         "use_hybrid": true
+       }'
   ```
 
 ---
