@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from pinecone import Pinecone, EmbedQuery, TextQuery
 from groq import Groq
 from pypdf import PdfReader
+from src.cache import rag_cache
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -119,6 +120,8 @@ def upload_and_index_document(title: str, content: str) -> int:
         namespace="default",
         documents=documents_to_upsert,
     )
+    # Invalidate stale cache entries whenever new knowledge is added
+    rag_cache.clear()
     return len(documents_to_upsert)
 
 
@@ -169,7 +172,16 @@ def reciprocal_rank_fusion(
 
 
 def answer_query(query: str) -> dict:
-    """Standard Dense Vector Search RAG."""
+    """Standard Dense Vector Search RAG with Redis Cache."""
+    cached = rag_cache.get(query)
+    if cached:
+        return {
+            "answer": cached["answer"],
+            "sources": cached["sources"],
+            "cache_hit": True,
+            "cache_type": cached["cache_type"],
+        }
+
     search_result = index.documents.search(
         namespace="default",
         top_k=3,
@@ -206,14 +218,25 @@ Answer:"""
         model=GROQ_MODEL,
     )
 
+    answer_text = chat_completion.choices[0].message.content
+    rag_cache.set(query=query, answer=answer_text, sources=retrieved_chunks)
+
     return {
-        "answer": chat_completion.choices[0].message.content,
+        "answer": answer_text,
         "sources": retrieved_chunks,
     }
 
 
 def answer_query_hybrid(query: str, top_k_retrieval: int = 10, final_top_n: int = 3) -> dict:
-    """Advanced Hybrid (Dense + BM25) + RRF + Cross-Encoder Reranking RAG."""
+    """Advanced Hybrid (Dense + BM25) + RRF + Cross-Encoder Reranking RAG with Redis Cache."""
+    cached = rag_cache.get(query)
+    if cached:
+        return {
+            "answer": cached["answer"],
+            "sources": cached["sources"],
+            "pipeline_type": f"cache_hit ({cached['cache_type']}, sim={cached['similarity']})",
+        }
+
     dense_result = index.documents.search(
         namespace="default",
         top_k=top_k_retrieval,
@@ -269,8 +292,11 @@ Answer:"""
         model=GROQ_MODEL,
     )
 
+    answer_text = chat_completion.choices[0].message.content
+    rag_cache.set(query=query, answer=answer_text, sources=final_chunks)
+
     return {
-        "answer": chat_completion.choices[0].message.content,
+        "answer": answer_text,
         "sources": final_chunks,
         "pipeline_type": "hybrid_rrf_reranking",
     }
@@ -316,22 +342,60 @@ Standalone Search Query:"""
         return query
 
 
+def summarize_older_history(older_messages: list[dict]) -> str:
+    """
+    Summarize conversation turns older than the recent 6-message window.
+    Preserves key user details (e.g., user's name, preferences) and main topics
+    while keeping context window token usage compact.
+    """
+    if not older_messages:
+        return ""
+
+    transcript = "\n".join(
+        f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}"
+        for msg in older_messages
+    )
+
+    prompt = (
+        "Summarize the following earlier conversation concisely in 2-4 sentences. "
+        "Be sure to preserve important facts like the user's name, preferences, and key topics.\n\n"
+        f"Earlier Conversation:\n{transcript}\n\nSummary:"
+    )
+
+    try:
+        res = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model=GROQ_MODEL,
+            max_tokens=150,
+            temperature=0.0,
+        )
+        return res.choices[0].message.content.strip()
+    except Exception:
+        return ""
+
+
 def stream_conversational_rag(
     query: str,
     history: list[dict],
     use_hybrid: bool = True,
 ) -> Generator[str, None, None]:
     """
-    Full conversational RAG pipeline that yields tokens in real time (token streaming).
-
-    Workflow:
+    Full conversational RAG pipeline with Sliding Window + Summary Memory:
     1. Rephrases follow-up questions using conversation history into a standalone search query.
-    2. Retrieves the most relevant chunks using Hybrid Search or Dense Vector Search.
-    3. Builds a context-grounded conversation thread.
-    4. Streams response tokens directly from Groq Llama 3.3 70B.
+    2. Checks Redis Semantic Cache only for standalone queries (when history is empty).
+    3. Retrieves the most relevant chunks using Hybrid Search or Dense Vector Search.
+    4. Keeps the last 6 messages verbatim and summarizes any older turns beyond 6.
+    5. Streams response tokens directly from Groq LLM.
     """
     # Step 1: Contextualize the search query
     search_query = condense_conversational_query(query, history)
+
+    # Step 1.5: Check Redis Semantic Cache ONLY when there is no prior conversation history
+    if not history:
+        cached = rag_cache.get(search_query)
+        if cached:
+            yield cached["answer"]
+            return
 
     # Step 2: Retrieve relevant chunks
     if use_hybrid:
@@ -376,26 +440,43 @@ def stream_conversational_rag(
         ]
 
     # Step 3: Handle empty context
-    if not retrieved_chunks:
+    if not retrieved_chunks and not history:
         yield "Sorry, no relevant information was found in the indexed documents for your question."
         return
 
-    context_text = "\n\n---\n\n".join(retrieved_chunks)
+    context_text = (
+        "\n\n---\n\n".join(retrieved_chunks)
+        if retrieved_chunks
+        else "No matching document chunks were found for this query."
+    )
+
+    # Step 3.5: Summarize older messages if history exceeds the 6-message window
+    history_summary = ""
+    if len(history) > 6:
+        history_summary = summarize_older_history(history[:-6])
+
+    recent_messages = history[-6:]
+    summary_section = (
+        f"\n\nEarlier Conversation Summary:\n{history_summary}"
+        if history_summary
+        else ""
+    )
 
     # Step 4: Build conversational messages payload
     system_instruction = (
         "You are a helpful, accurate AI assistant. "
-        "Answer the user's question strictly using the provided context below. "
-        "Maintain conversational continuity with previous turns when answering. "
-        "If the answer cannot be deduced from the context, clearly state: "
+        "Answer the user's question using the provided Document Context AND the Conversation History "
+        "(including any personal details like the user's name or preferences mentioned in the chat). "
+        "If the question asks about a document fact that is not in the Document Context or Conversation History, reply: "
         "'Sorry, no relevant information was found for your question.'\n\n"
-        f"Context:\n{context_text}"
+        f"Document Context:\n{context_text}"
+        f"{summary_section}"
     )
 
     messages = [{"role": "system", "content": system_instruction}]
 
-    # Include recent conversation turns (up to 6)
-    for msg in history[-6:]:
+    # Include up to the most recent 6 conversation messages verbatim
+    for msg in recent_messages:
         messages.append({
             "role": msg.get("role", "user"),
             "content": msg.get("content", ""),
@@ -404,14 +485,24 @@ def stream_conversational_rag(
     # Add current user query
     messages.append({"role": "user", "content": query})
 
-    # Step 5: Stream tokens from Groq
+    # Step 5: Stream tokens from Groq and cache standalone responses
     stream = groq_client.chat.completions.create(
         messages=messages,
         model=GROQ_MODEL,
         stream=True,
     )
 
+    collected_tokens: list[str] = []
     for chunk in stream:
         delta = chunk.choices[0].delta.content
         if delta:
+            collected_tokens.append(delta)
             yield delta
+
+    # Save complete answer to Redis cache only for standalone queries (no history)
+    if collected_tokens and not history and retrieved_chunks:
+        rag_cache.set(
+            query=search_query,
+            answer="".join(collected_tokens),
+            sources=retrieved_chunks,
+        )

@@ -319,6 +319,7 @@ with st.sidebar:
     # Status Dashboard Card
     index_name = os.environ.get("PINECONE_INDEX_NAME", "rag-learn")
     active_model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+    redis_status = "Connected ⚡" if services.rag_cache.is_connected() else "Offline"
 
     st.markdown(
         f"""
@@ -337,6 +338,10 @@ with st.sidebar:
             <div class="status-item">
                 <span>Search Mode</span>
                 <span class="status-badge">{'Hybrid + Rerank' if use_hybrid else 'Dense Vector'}</span>
+            </div>
+            <div class="status-item">
+                <span>Redis Cache</span>
+                <span class="status-badge">{redis_status}</span>
             </div>
             <div class="status-item">
                 <span>Streaming</span>

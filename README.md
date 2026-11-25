@@ -9,12 +9,13 @@ This application allows you to ingest documents, automatically chunk and index t
 ## 🚀 Features
 
 - **Integrated Vector Embeddings:** Leverages Pinecone's serverless integrated embedding model (`llama-text-embed-v2` · 1024 dimensions) — no external or local embedding pipelines required.
-- **Ultra-Fast LLM Inference:** Powered by Groq's high-speed LPU running Meta's `llama-3.3-70b-versatile`.
+- **Ultra-Fast LLM Inference:** Powered by Groq's high-speed LPU (configurable via `GROQ_MODEL`, e.g., `openai/gpt-oss-120b`).
+- **Redis Exact & Semantic Caching:** Two-layer Redis cache using SHA-256 exact keys and local FastEmbed + NumPy cosine similarity (`>= 0.88`) with automatic TTL and terminal hit/miss logging.
 - **Hybrid Search & Cross-Encoder Reranking:** Dense Semantic Search + Sparse BM25 Keyword Search combined with Reciprocal Rank Fusion (RRF) and refined with `bge-reranker-v2-m3`.
 - **PDF & Document Ingestion:** Directly upload `.pdf`, `.txt`, or `.md` files; text is parsed and indexed automatically.
-- **Conversational Memory:** Contextualizes follow-up questions using multi-turn chat history.
+- **Sliding Window + Summary Memory:** Keeps the last 6 messages verbatim, automatically summarizes older turns beyond 6 to preserve user details (like name/preferences) without overflowing the context window.
 - **Real-Time Token Streaming:** Live word-by-word streaming responses (ChatGPT-style typing effect).
-- **Interactive Streamlit Web UI:** Beautiful, ready-to-use frontend for document uploads and live chatting.
+- **Interactive Streamlit Web UI:** Beautiful Cyber Dark Blue frontend for document uploads, diagnostics, and live chatting.
 - **Layered Architecture:** Clean separation of concerns with a modular `src/` layout (Schemas, Services, API Routers).
 - **Graceful Error Handling:** Comprehensive `try-except` blocks returning meaningful HTTP status codes (`400`, `500`) with actionable error details.
 - **Interactive Documentation:** Automatic Swagger/OpenAPI documentation via FastAPI.
@@ -52,15 +53,18 @@ This application allows you to ingest documents, automatically chunk and index t
 ```
 Pinecone Learn/
 ├── .env                  # Environment secrets & credentials
+├── docker-compose.yml    # Redis Docker service configuration
 ├── pyproject.toml        # Project dependencies and configuration
 ├── uv.lock               # Deterministic dependency lockfile
 ├── README.md             # Project documentation
+├── app_ui.py             # Interactive Streamlit Web UI
 ├── main.py               # Application entrypoint & FastAPI initialization
 └── src/
     ├── __init__.py       # Package marker
-    ├── api.py            # FastAPI Router and endpoint handlers (/upload-document, /ask)
+    ├── api.py            # FastAPI Router and endpoint handlers
+    ├── cache.py          # Redis Exact + Semantic Cache (FastEmbed + NumPy)
     ├── schemas.py        # Pydantic request and response schemas
-    └── services.py       # Core RAG engine: chunking, Pinecone upsert & Groq generation
+    └── services.py       # Core RAG engine: chunking, Pinecone, Groq & Caching
 ```
 
 ---
@@ -96,6 +100,14 @@ Create a `.env` file in the root directory:
 PINECONE_API_KEY=your_pinecone_api_key_here
 PINECONE_INDEX_NAME=rag-learn
 GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=openai/gpt-oss-120b
+REDIS_PORT=6391
+REDIS_URL=redis://localhost:6391/0
+```
+
+### Start Redis Cache (Docker Compose)
+```bash
+docker compose up -d
 ```
 
 ### Where to get your API Keys:
@@ -124,17 +136,88 @@ When creating your index in the [Pinecone Console](https://app.pinecone.io/):
 
 ## 🖥️ Interactive Web UI (Streamlit)
 
-Launch the modern chat interface in your browser:
+The application includes a fully customizable, production-ready **Streamlit web application** (`app_ui.py`) designed with a sleek **Cyber Dark Blue Theme** and packed with real-time AI chat capabilities.
+
+### 🚀 Launch the Web UI
 
 ```bash
 uv run streamlit run app_ui.py
 ```
 
-Features included in the Web UI:
-- **Sidebar File Ingestion:** Drag-and-drop any PDF or TXT document and index it into Pinecone with one click.
-- **Real-Time Token Streaming:** Watch responses generate word-by-word like ChatGPT.
-- **Conversational Memory:** Ask natural follow-up questions in a continuous conversation thread.
-- **Search Toggle:** Easily toggle Hybrid Search + Reranking on/off.
+---
+
+### 🎨 UI Layout & Architecture
+
+```
+┌──────────────────────────────────────┬────────────────────────────────────────────────────────┐
+│               SIDEBAR                │                       MAIN CHAT                        │
+├──────────────────────────────────────┼────────────────────────────────────────────────────────┤
+│  📂 Document Ingestion               │  ┌──────────────────────────────────────────────────┐  │
+│  ┌────────────────────────────────┐  │  │  🌲 Hero Banner: AI Knowledge Assistant          │  │
+│  │ [📁 File Upload] [✍️ Paste Text]│  │  │  Model, Pinecone status, and description badge   │  │
+│  └────────────────────────────────┘  │  └──────────────────────────────────────────────────┘  │
+│                                      │                                                        │
+│  ⚙️ Search Configuration             │  🤖 Assistant Message (Electric Blue Accent)           │
+│  [🔘 Hybrid Search & Reranking]     │  "Hello! I am your AI Knowledge Assistant..."          │
+│                                      │                                                        │
+│  ⚡ System Diagnostics Card          │  👤 User Message (Royal Navy Accent)                   │
+│  • Index: rag-learn                  │  "What is the company leave policy?"                   │
+│  • LLM Engine: Active Groq Model     │                                                        │
+│  • Search Mode: Hybrid + Rerank      │  ⚡ Thinking Indicator (Pulsing Animation)             │
+│  • Streaming: Enabled                │  "Searching knowledge base & formulating answer..."    │
+│                                      │                                                        │
+│  [🗑️ Clear Conversation History]    │  💬 Chat Input: "Ask a question about your docs..."    │
+└──────────────────────────────────────┴────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🌟 Key UI Features & Engineering Highlights
+
+#### 1. 🌓 Modern Cyber & Dark Blue Aesthetic
+* **Custom CSS Theme:** Built with high-contrast, eye-friendly dark slate tones (`#0F172A`, `#1E293B`, `#334155`) and vibrant royal blue accents (`#2563EB`, `#3B82F6`, `#60A5FA`).
+* **Hero Banner Card:** Premium gradient card (`#0F172A` ➔ `#1E3A8A` ➔ `#2563EB`) with a glassmorphism pill badge and subtle elevation shadows.
+* **Color-Coded Message Cards:**
+  * **User Bubbles:** Deep navy gradient (`#172554` ➔ `#1E3A8A`) with an electric blue border (`#60A5FA`).
+  * **AI Assistant Bubbles:** Dark slate card (`#1E293B`) with a neon blue left border (`#3B82F6`).
+
+#### 2. ⚡ Animated "Thinking..." State Indicator
+* **Visual Progress Feedback:** While Pinecone performs dense vector search, BM25 keyword matching, and cross-encoder reranking, a glowing animated badge is rendered in the chat bubble:
+  > `⚡ Thinking and searching knowledge base...`
+* As soon as the first token arrives from the LLM, the indicator automatically vanishes to make way for the answer.
+
+#### 3. ✍️ Real-Time Paced Typewriter Streaming
+* **Human-Paced Delivery:** Ultra-fast LLMs like Groq generate 300–500+ tokens/second, which can make answers appear abruptly. The UI implements an **18ms rhythmic typewriter pacing delay** (`paced_stream_generator`), giving users a smooth, authentic ChatGPT/Claude streaming experience.
+
+#### 4. 📂 Dual Document Ingestion System (Sidebar Tabs)
+* **📁 Tab 1: File Upload:**
+  * Supports direct drag-and-drop of `.pdf`, `.txt`, and `.md` files (up to 25MB).
+  * Automatically parses multi-page PDFs using `pypdf`, breaks text into overlapping chunks, and upserts them to Pinecone with instant feedback.
+* **✍️ Tab 2: Paste Raw Text:**
+  * Document Title and Content text area for indexing raw text, internal policies, or articles without needing a physical file.
+
+#### 5. 🧠 Sliding Window + Summary Buffer Memory
+* Maintains session conversation history (`st.session_state.messages`) and contextualizes follow-up questions before searching Pinecone.
+* **Sliding Window (Last 6 Messages):** Keeps the 6 most recent messages verbatim for exact short-term continuity.
+* **Automatic Summarization:** Any conversation turns older than 6 messages are automatically summarized by the LLM (`summarize_older_history`), preserving personal details (like the user's name or preferences) while keeping context-window token usage compact.
+* **Smart Cache Bypass:** Standalone queries use Redis cache, while follow-up conversational turns bypass cache so personal chat context is always respected.
+
+#### 6. ⚙️ Interactive Controls & Diagnostics Card
+* **Search Mode Toggle:** Switch seamlessly between **Hybrid Search + Reranking** and **Standard Dense Vector Search**.
+* **System Diagnostics Card:** Displays real-time status of the Pinecone Index, Active LLM Model, Search Mode, **Redis Cache (`Connected ⚡` / `Offline`)**, and Streaming state.
+* **Clear Chat Button:** Resets the conversation session state with one click.
+
+---
+
+## ⚡ Redis Exact & Semantic Caching
+
+The project includes a production-grade two-layer caching engine (`src/cache.py`) backed by Redis:
+
+1. **Layer 1 — Exact Match Cache (`<1ms`):** Uses SHA-256 hashes of normalized queries to serve identical repeated questions directly from Redis.
+2. **Layer 2 — Semantic Match Cache (`~5-10ms`):** Embeds incoming queries locally with **FastEmbed** (`BAAI/bge-small-en-v1.5`) and checks Cosine Similarity against cached query vectors in Redis (`threshold >= 0.88`). Differently worded questions with the same meaning are served from cache without calling Pinecone or Groq!
+3. **Auto Invalidation & TTL:** Cache entries automatically expire after 1 hour (`ttl_seconds=3600`), and `rag_cache.clear()` invalidates stale entries whenever a new document is uploaded.
+4. **Live Terminal Logging:** Prints `[CACHE HIT - EXACT]`, `[CACHE HIT - SEMANTIC]`, `[CACHE MISS]`, `[CACHE SET]`, and `[CACHE CLEAR]` in real time to your terminal.
+5. **Fail-Open Resilience:** If Redis is offline, the system gracefully falls back to the standard RAG pipeline without crashing.
 
 ---
 

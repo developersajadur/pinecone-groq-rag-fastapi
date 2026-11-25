@@ -9,5 +9,6 @@ dependencies = [
     "pinecone>=10.1.0",
     "pypdf>=7.1.1",
     "python-dotenv>=1.2.4",
+    "redis>=5.0.0",
     "streamlit>=1.67.0",
 ]
