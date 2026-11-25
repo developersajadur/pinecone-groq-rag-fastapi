@@ -29,6 +29,16 @@ st.markdown(
         font-family: 'Plus Jakarta Sans', sans-serif;
     }
 
+    /* Force Unified Dark Background Regardless of OS/Browser Mode */
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"],
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div {
+        background-color: #0B0F19 !important;
+        color: #F8FAFC !important;
+    }
+
     /* Thinking Box Animation */
     @keyframes pulseGlow {
         0% { opacity: 0.6; transform: scale(0.99); }
@@ -192,19 +202,62 @@ st.markdown(
         border-color: #1E40AF !important;
     }
 
-    /* Chat Input Styling */
-    [data-testid="stChatInput"] {
+    /* Chat Input Styling (Bulletproof for Light & Dark Mode) */
+    [data-testid="stChatInput"],
+    [data-testid="stChatInput"] > div,
+    [data-testid="stChatInputContainer"] {
         border-radius: 14px !important;
         background-color: #1E293B !important;
+        border-color: #334155 !important;
+    }
+    [data-testid="stChatInput"] {
         border: 1.5px solid #334155 !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important;
     }
     [data-testid="stChatInput"] textarea {
         color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        caret-color: #60A5FA !important;
+        background-color: transparent !important;
+    }
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: #94A3B8 !important;
+        -webkit-text-fill-color: #94A3B8 !important;
+    }
+    [data-testid="stChatInput"] button {
+        background-color: #2563EB !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
     }
     [data-testid="stChatInput"]:focus-within {
         border-color: #3B82F6 !important;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.35) !important;
+    }
+
+    /* File Uploader Dropzone Styling (Bulletproof for Light & Dark Mode) */
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploader"] section {
+        background-color: #1E293B !important;
+        border: 2px dashed #3B82F6 !important;
+        border-radius: 12px !important;
+        color: #E2E8F0 !important;
+    }
+    [data-testid="stFileUploaderDropzone"]:hover,
+    [data-testid="stFileUploader"] section:hover {
+        background-color: #172554 !important;
+        border-color: #60A5FA !important;
+    }
+    [data-testid="stFileUploaderDropzone"] small,
+    [data-testid="stFileUploaderDropzone"] span,
+    [data-testid="stFileUploaderDropzone"] div {
+        color: #CBD5E1 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button {
+        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
     }
 
     /* Inputs & Textareas Styling */
